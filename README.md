@@ -1,4 +1,3 @@
-HEAD
 # 🤖 GenAI Resume–JD Matcher
 
 > AI-powered resume analysis, skill gap detection, cover letter generation & interview prep — built with FastAPI + Groq LLaMA 3.3 + FAISS.
