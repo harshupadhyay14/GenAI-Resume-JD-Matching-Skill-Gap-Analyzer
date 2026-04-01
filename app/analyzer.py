@@ -1,18 +1,13 @@
-"""
-LLM Analyzer Module — Upgraded
-Uses Groq LLaMA 3 for:
-- Deep match analysis
-- Cover letter generation
-- Resume bullet rewriting
-- Interview question prediction
-"""
-
 import os
 import json
 import re
 from groq import Groq
+from typing import List, Dict, Optional
+from dotenv import load_dotenv
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+load_dotenv()
+
+_client = None
 
 ANALYSIS_PROMPT = """You are an expert technical recruiter and career coach with 15+ years of experience.
 
@@ -81,10 +76,10 @@ Write a professional cover letter (3-4 paragraphs) that:
 3. Addresses why this specific company/role excites the candidate
 4. Closes with a confident call to action
 
-Keep it under 350 words. Sound human, not generic. Infer company name from JD if possible, else use "your team".
+Keep it under 350 words. Sound human, not generic.
 Return ONLY the cover letter text, no JSON, no extra formatting."""
 
-BULLET_REWRITER_PROMPT = """You are an expert resume coach. Rewrite the following resume bullet point to be stronger.
+BULLET_REWRITER_PROMPT = """You are an expert resume coach. Rewrite the following resume bullet point.
 
 Original bullet: {bullet}
 Job description context: {job_description}
@@ -112,7 +107,7 @@ INTERVIEW_QUESTIONS_PROMPT = """You are a senior technical interviewer. Based on
 
 Generate 10 interview questions:
 - 4 technical questions based on JD requirements
-- 3 behavioral questions based on candidate's experience  
+- 3 behavioral questions based on candidate experience
 - 2 questions probing skill gaps
 - 1 curveball question
 
@@ -126,7 +121,20 @@ Return ONLY this JSON (no markdown):
 ]"""
 
 
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if api_key:
+            _client = Groq(api_key=api_key)
+    return _client
+
+
 def analyze_match_with_llm(resume_text, job_description, similarity_score, matched_skills, missing_skills):
+    client = get_client()
+    if not client:
+        return _fallback_analysis(matched_skills, missing_skills, similarity_score)
+
     prompt = ANALYSIS_PROMPT.format(
         resume_text=resume_text[:3000],
         job_description=job_description[:2000],
@@ -136,7 +144,7 @@ def analyze_match_with_llm(resume_text, job_description, similarity_score, match
     )
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are an expert technical recruiter. Always respond with valid JSON only."},
                 {"role": "user", "content": prompt}
@@ -163,11 +171,14 @@ def analyze_match_with_llm(resume_text, job_description, similarity_score, match
 
 
 def generate_cover_letter(resume_text: str, job_description: str) -> str:
+    client = get_client()
+    if not client:
+        return "GROQ_API_KEY not set. Please configure it to generate cover letters."
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are an expert career coach who writes compelling, human-sounding cover letters."},
+                {"role": "system", "content": "You are an expert career coach who writes compelling cover letters."},
                 {"role": "user", "content": COVER_LETTER_PROMPT.format(
                     resume_text=resume_text[:2500],
                     job_description=job_description[:1500]
@@ -182,9 +193,16 @@ def generate_cover_letter(resume_text: str, job_description: str) -> str:
 
 
 def rewrite_bullet_points(bullet: str, job_description: str) -> list:
+    client = get_client()
+    if not client:
+        return [
+            f"Engineered {bullet[:45]}... delivering measurable performance improvements",
+            f"Architected and deployed {bullet[:40]}... achieving 30% efficiency gain",
+            f"Led development of {bullet[:45]}... resulting in production-ready solution",
+        ]
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are an expert resume coach. Return only valid JSON arrays."},
                 {"role": "user", "content": BULLET_REWRITER_PROMPT.format(
@@ -207,9 +225,12 @@ def rewrite_bullet_points(bullet: str, job_description: str) -> list:
 
 
 def generate_interview_questions(resume_text: str, job_description: str, missing_skills: list) -> list:
+    client = get_client()
+    if not client:
+        return _fallback_questions()
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are a senior technical interviewer. Return only valid JSON."},
                 {"role": "user", "content": INTERVIEW_QUESTIONS_PROMPT.format(
@@ -225,21 +246,25 @@ def generate_interview_questions(resume_text: str, job_description: str, missing
         raw = re.sub(r"\s*```$", "", raw)
         return json.loads(raw)
     except Exception as e:
-        return [
-            {"question": "Walk me through your most impactful ML project.", "type": "Technical", "tip": "Use STAR method and quantify results."},
-            {"question": "How do you handle model drift in production?", "type": "Technical", "tip": "Mention monitoring and retraining pipelines."},
-            {"question": "Describe a time you debugged a complex system issue.", "type": "Behavioral", "tip": "Focus on your systematic debugging approach."},
-            {"question": "What's your experience with RAG systems?", "type": "Skill Gap", "tip": "Be honest and show eagerness to learn fast."},
-        ]
+        return _fallback_questions()
+
+
+def _fallback_questions():
+    return [
+        {"question": "Walk me through your most impactful ML project.", "type": "Technical", "tip": "Use STAR method and quantify results."},
+        {"question": "How do you handle model drift in production?", "type": "Technical", "tip": "Mention monitoring and retraining pipelines."},
+        {"question": "Describe a time you debugged a complex system issue.", "type": "Behavioral", "tip": "Focus on your systematic debugging approach."},
+        {"question": "What's your experience with RAG systems?", "type": "Skill Gap", "tip": "Be honest and show eagerness to learn fast."},
+    ]
 
 
 def _fallback_analysis(matched_skills, missing_skills, similarity_score):
     score = round(similarity_score * 100)
     return {
-        "overall_assessment": f"Semantic match score: {score}%. The resume shows overlap with the job description. Manual review recommended.",
+        "overall_assessment": f"Semantic match score: {score}%. The resume shows overlap with the job description. Manual review recommended for full assessment.",
         "strengths": [f"Matched skill: {s}" for s in matched_skills[:4]] or ["Resume uploaded successfully"],
         "skill_gap_details": [
-            {"skill": s, "importance": "Medium", "suggestion": f"Consider adding {s} through online courses.", "resource": "https://www.coursera.org"}
+            {"skill": s, "importance": "Medium", "suggestion": f"Consider adding {s} to your skill set through online courses or projects.", "resource": "https://www.coursera.org"}
             for s in missing_skills[:5]
         ],
         "improvement_suggestions": [
