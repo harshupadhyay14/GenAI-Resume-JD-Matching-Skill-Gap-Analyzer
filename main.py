@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.parser import extract_text_from_file
-from app.embedder import compute_semantic_similarity, extract_skills
+from app.embedder import compute_similarity, extract_skills_from_text
 from app.analyzer import (
     analyze_match_with_llm,
     generate_cover_letter,
@@ -69,9 +69,9 @@ async def analyze_resume(
         if not resume_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file.")
 
-        similarity_score = compute_semantic_similarity(resume_text, job_description)
-        resume_skills = extract_skills(resume_text)
-        jd_skills = extract_skills(job_description)
+        similarity_score = compute_similarity(resume_text, job_description)
+        resume_skills = extract_skills_from_text(resume_text)
+        jd_skills = extract_skills_from_text(job_description)
         matched_skills = [s for s in jd_skills if any(s.lower() in rs.lower() or rs.lower() in s.lower() for rs in resume_skills)]
         missing_skills = [s for s in jd_skills if s not in matched_skills]
 
