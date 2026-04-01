@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from app.parser import extract_text
+from app.parser import extract_text_from_file
 from app.embedder import compute_semantic_similarity, extract_skills
 from app.analyzer import (
     analyze_match_with_llm,
@@ -65,7 +65,7 @@ async def analyze_resume(
         f.write(content)
 
     try:
-        resume_text = extract_text(str(file_path))
+        resume_text = extract_text_from_file(str(file_path))
         if not resume_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file.")
 
