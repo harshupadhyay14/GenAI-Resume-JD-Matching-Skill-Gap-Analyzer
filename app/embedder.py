@@ -9,6 +9,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Load model once at startup (cached globally)
 _model = None
 
@@ -69,7 +72,7 @@ def get_model() -> SentenceTransformer:
     global _model
     if _model is None:
         print("Loading SentenceTransformer model...")
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
         print("Model loaded successfully.")
     return _model
 
