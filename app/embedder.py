@@ -12,6 +12,9 @@ import faiss
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+import os
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/st_cache"
+
 # Load model once at startup (cached globally)
 _model = None
 

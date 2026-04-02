@@ -11,6 +11,17 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-load model at startup
+    from app.embedder import get_model
+    get_model()
+    yield
+
+app = FastAPI(title="GenAI Resume–JD Matcher", version="2.0.0", lifespan=lifespan)
+
 from app.parser import extract_text_from_file
 from app.embedder import compute_similarity, extract_skills_from_text
 from app.analyzer import (
