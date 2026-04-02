@@ -1,22 +1,17 @@
 """
-Embedder Module
-Uses Sentence Transformers + FAISS for semantic similarity computation.
-Also extracts skills using keyword matching + NLP heuristics.
+Embedder Module — Groq-only / Lightweight Version
+Uses TF-IDF + cosine similarity instead of local sentence-transformers.
+Groq does not offer an embeddings API, so TF-IDF with bigrams is used —
+fast, ~5MB RAM, and works well for keyword-rich resume/JD text.
 """
 
 import re
+import os
 import numpy as np
-from sentence_transformers import SentenceTransformer
-import faiss
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-import os
-os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/st_cache"
-
-# Load model once at startup (cached globally)
-_model = None
 
 # Comprehensive skill keyword list across 10+ categories
 SKILL_KEYWORDS = {
@@ -64,66 +59,49 @@ SKILL_KEYWORDS = {
     ],
 }
 
-# Flatten for quick lookup
 ALL_SKILLS = []
 for category, skills in SKILL_KEYWORDS.items():
     ALL_SKILLS.extend(skills)
 
 
-def get_model() -> SentenceTransformer:
-    """Lazy-load the sentence transformer model."""
-    global _model
-    if _model is None:
-        print("Loading SentenceTransformer model...")
-        _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-        print("Model loaded successfully.")
-    return _model
-
-
-def get_embedding(text: str) -> np.ndarray:
-    """Get sentence embedding as a numpy array."""
-    model = get_model()
-    embedding = model.encode([text], convert_to_numpy=True, normalize_embeddings=True)
-    return embedding.astype("float32")
+def get_model():
+    """No-op: kept for compatibility with main.py lifespan call."""
+    print("Lightweight mode: using TF-IDF similarity (no local model loaded).")
 
 
 def compute_similarity(text1: str, text2: str) -> float:
     """
-    Compute cosine similarity between two texts using FAISS.
+    Compute cosine similarity between two texts using TF-IDF.
+    Uses unigrams + bigrams for better phrase matching.
     Returns a float between 0 and 1.
     """
-    emb1 = get_embedding(text1)
-    emb2 = get_embedding(text2)
-
-    # Build FAISS index with text1's embedding
-    dim = emb1.shape[1]
-    index = faiss.IndexFlatIP(dim)  # Inner product on normalized = cosine similarity
-    index.add(emb1)
-
-    # Search for nearest neighbor (text2)
-    distances, _ = index.search(emb2, k=1)
-    similarity = float(distances[0][0])
-
-    # Clamp to [0, 1]
-    return max(0.0, min(1.0, similarity))
+    try:
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            max_features=8000,
+            ngram_range=(1, 2),
+        )
+        tfidf_matrix = vectorizer.fit_transform([text1, text2])
+        score = cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0]
+        return float(max(0.0, min(1.0, score)))
+    except Exception as e:
+        print(f"Similarity computation error: {e}")
+        return 0.5
 
 
 def extract_skills_from_text(text: str) -> list[str]:
     """
     Extract skills from text using keyword matching.
-    Returns a deduplicated list of found skills (original casing from keyword list).
+    Returns a deduplicated list of found skills.
     """
     text_lower = text.lower()
     found_skills = []
 
     for skill in ALL_SKILLS:
-        # Use word boundary matching for accuracy
         pattern = r'\b' + re.escape(skill.lower()) + r'\b'
         if re.search(pattern, text_lower):
-            # Return proper-cased version
             found_skills.append(skill.title() if len(skill.split()) == 1 else skill.title())
 
-    # Deduplicate while preserving order
     seen = set()
     unique_skills = []
     for s in found_skills:
