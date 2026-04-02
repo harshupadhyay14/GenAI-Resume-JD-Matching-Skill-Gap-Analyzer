@@ -2,6 +2,7 @@
 GenAI Resume–JD Matching & Skill Gap Analyzer — Upgraded
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -11,7 +12,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from contextlib import asynccontextmanager
+load_dotenv()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,6 +21,7 @@ async def lifespan(app: FastAPI):
     from app.embedder import get_model
     get_model()
     yield
+
 
 app = FastAPI(title="GenAI Resume–JD Matcher", version="2.0.0", lifespan=lifespan)
 
@@ -34,10 +37,6 @@ from app.models import (
     MatchResponse, CoverLetterRequest, CoverLetterResponse,
     BulletRewriteRequest, BulletRewriteResponse, InterviewQuestionsResponse
 )
-
-load_dotenv()
-
-app = FastAPI(title="GenAI Resume–JD Matcher", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -138,4 +137,4 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)
