@@ -547,7 +547,7 @@
     }
 
     // Store resume text for AI tabs (read from form cache)
-    lastResumeText = data.matched_skills.join(' ') + ' ' + data.resume_skills.join(' ');
+    lastResumeText = data.resume_skills.join(', ');
 
     document.getElementById('results').style.display = 'block';
   }

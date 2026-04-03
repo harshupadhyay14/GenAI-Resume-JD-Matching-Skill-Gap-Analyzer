@@ -93,7 +93,7 @@ async def analyze_resume(
         _last_analysis_cache["missing_skills"] = missing_skills
 
         return MatchResponse(
-            match_score=round(similarity_score, 2),
+            match_score=round(similarity_score * 100, 1),
             resume_skills=resume_skills,
             jd_skills=jd_skills,
             matched_skills=matched_skills,
