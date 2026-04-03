@@ -1,19 +1,17 @@
 """
-Embedder Module — Lightweight Version (HuggingFace API + TF-IDF fallback)
-Fixes 0% match score by rescaling TF-IDF cosine similarity to 0–1 range.
+Embedder Module — Groq-powered Similarity
+Uses Groq LLaMA to compute semantic similarity score between resume and JD.
+Falls back to rescaled TF-IDF if Groq is unavailable.
+No local model, no HuggingFace — zero heavy dependencies.
 """
 
 import re
 import os
 import numpy as np
-import httpx
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-HF_API_KEY = os.getenv("HF_API_KEY", "")
-HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
 
 SKILL_KEYWORDS = {
     "Programming Languages": [
@@ -67,43 +65,61 @@ for category, skills in SKILL_KEYWORDS.items():
 
 def get_model():
     """No-op: kept for compatibility with main.py lifespan call."""
-    print("Lightweight mode: using HuggingFace API + TF-IDF fallback.")
+    print("Lightweight mode: using Groq LLM similarity + TF-IDF fallback.")
 
 
-def _hf_embed(texts: list) -> np.ndarray:
-    """Call HuggingFace Inference API for embeddings."""
-    if not HF_API_KEY:
+def _groq_similarity(text1: str, text2: str) -> float:
+    """
+    Use Groq LLaMA to estimate semantic match score between resume and JD.
+    Returns a float between 0 and 1.
+    """
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if not groq_key:
+        print("No GROQ_API_KEY found, using TF-IDF fallback.")
         return None
     try:
-        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        with httpx.Client(timeout=20.0) as client:
-            response = client.post(
-                HF_API_URL,
-                headers=headers,
-                json={"inputs": texts, "options": {"wait_for_model": True}},
-            )
-        if response.status_code == 200:
-            data = response.json()
-            result = []
-            for item in data:
-                if isinstance(item[0], list):
-                    arr = np.array(item)
-                    result.append(arr.mean(axis=0))
-                else:
-                    result.append(np.array(item))
-            return np.array(result, dtype="float32")
+        from groq import Groq
+        client = Groq(api_key=groq_key)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert resume screener. "
+                        "Your task is to rate how well a resume matches a job description. "
+                        "Consider skills, experience, projects, and overall fit. "
+                        "Respond with ONLY a single integer between 0 and 100. "
+                        "No explanation, no text, no punctuation — just the number."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Rate the match between this resume and job description from 0 to 100.\n\n"
+                        f"RESUME:\n{text1[:2500]}\n\n"
+                        f"JOB DESCRIPTION:\n{text2[:1500]}\n\n"
+                        f"Reply with only a number 0-100:"
+                    )
+                }
+            ],
+            temperature=0.1,
+            max_tokens=5,
+        )
+        raw = response.choices[0].message.content.strip()
+        score = float(''.join(filter(lambda c: c.isdigit() or c == '.', raw)))
+        score = max(0.0, min(100.0, score))
+        print(f"Groq similarity score: {score}")
+        return score / 100.0
     except Exception as e:
-        print(f"HF API error: {e}")
-    return None
+        print(f"Groq similarity error: {e}")
+        return None
 
 
 def _tfidf_similarity(text1: str, text2: str) -> float:
     """
-    TF-IDF cosine similarity with rescaling.
-    Raw TF-IDF scores on long docs are naturally very low (0.02–0.15).
-    We rescale to a 0–1 range that maps meaningfully to 0–100% for display.
-    Rescaling: score / 0.35 clamped to [0, 1]
-    (0.35 is the practical max cosine sim between a resume and JD via TF-IDF)
+    TF-IDF cosine similarity with rescaling as fallback.
+    Raw scores are very low (0.02–0.15), rescaled to 0–1 range.
     """
     try:
         vectorizer = TfidfVectorizer(
@@ -113,10 +129,8 @@ def _tfidf_similarity(text1: str, text2: str) -> float:
         )
         tfidf_matrix = vectorizer.fit_transform([text1, text2])
         raw_score = float(cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0])
-
-        # Rescale: raw TF-IDF cosine sim between resume/JD rarely exceeds 0.35
-        # Map 0.0–0.35 → 0.0–1.0 for meaningful percentage display
         rescaled = raw_score / 0.35
+        print(f"TF-IDF fallback score: {round(rescaled * 100, 1)}")
         return float(max(0.0, min(1.0, rescaled)))
     except Exception as e:
         print(f"TF-IDF similarity error: {e}")
@@ -126,21 +140,13 @@ def _tfidf_similarity(text1: str, text2: str) -> float:
 def compute_similarity(text1: str, text2: str) -> float:
     """
     Compute similarity between resume and JD.
-    Uses HuggingFace API if HF_API_KEY is set, otherwise rescaled TF-IDF.
+    1. Try Groq LLaMA (semantic, accurate)
+    2. Fall back to rescaled TF-IDF
     Returns float between 0 and 1.
     """
-    # Try HuggingFace API first
-    embeddings = _hf_embed([text1, text2])
-    if embeddings is not None and len(embeddings) == 2:
-        a, b = embeddings[0], embeddings[1]
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        score = float(np.dot(a, b) / (norm_a * norm_b))
-        return max(0.0, min(1.0, score))
-
-    # Fallback: rescaled TF-IDF
+    score = _groq_similarity(text1, text2)
+    if score is not None:
+        return score
     return _tfidf_similarity(text1, text2)
 
 
